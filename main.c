@@ -1,45 +1,20 @@
-#include <stdlib.h>
-#include <stdio.h>
+/*
+ * File:   LightHouse.c
+ * Author: Bader Daka & Noor Haj Dawood
+ * Created on December 30, 2021, 11:00 AM
+ */
+
 #include "System/system.h"
 #include "System/delay.h"
 #include "oledDriver/oledC.h"
 #include "oledDriver/oledC_colors.h"
 #include "oledDriver/oledC_shapes.h"
-
-typedef unsigned char DISPLAY_MODE;
-#define MODE_NORMAL 0
-#define MODE_INVERSE !MODE_NORMAL
+#include <xc.h>
+#include <p24FJ256GA705.h>
 
 static uint16_t current_background_color;
 
-void InitializeUserHardware(void)
-{
-    TRISBbits.TRISB12 = 1;
-    ANSBbits.ANSB12 = 1;
-    AD1CON1bits.SSRC = 0;
-    AD1CON1bits.FORM = 0;
-    AD1CON1bits.ASAM = 0;
-    AD1CON1bits.ADSIDL = 0;
-    AD1CON1bits.DMABM = 0;
-    AD1CON1bits.DMAEN = 0;
-    AD1CON1bits.MODE12 = 0;
-
-    AD1CON2 = 0x00;
-    AD1CON3bits.ADCS = 0xFF;
-    AD1CON3bits.SAMC = 0x10;
-    AD1CON3bits.ADRC = 0x00;
-    AD1CON3bits.EXTSAM = 0x00;
-    AD1CON3bits.PUMPEN = 0x00;
-
-    TRISAbits.TRISA11 = 1;
-    TRISAbits.TRISA12 = 1;
-    TRISAbits.TRISA8 = 0;
-    TRISAbits.TRISA9 = 0;
-
-    AD1CHSbits.CH0SA = 8;
-    AD1CON1bits.ADON = 1;
-}
-
+// Clear OLED screen function
 static void oledC_clearScreen(void)
 {
     uint8_t column;
@@ -57,7 +32,8 @@ static void oledC_clearScreen(void)
     }
 }
 
-static void SetOLEDBackground(uint16_t color)
+// Set OLED background color
+static void oledC_setBackground(uint16_t color)
 {
     if (current_background_color != color)
     {
@@ -66,109 +42,74 @@ static void SetOLEDBackground(uint16_t color)
     }
 }
 
-void ToggleDisplayMode(int *counter, int *potentiometer_value, int *previous_potentiometer_value, DISPLAY_MODE *current_mode)
+// User initialization function
+void user_init()
 {
-    if (*current_mode == MODE_NORMAL)
-    {
-        oledC_sendCommand(OLEDC_CMD_SET_DISPLAY_MODE_ON, NULL, 0);
-    }
-    else
-    {
-        oledC_sendCommand(OLEDC_CMD_SET_DISPLAY_MODE_INVERSE, NULL, 0);
-    }
+    oledC_setBackground(OLEDC_COLOR_BLACK);
 
-    *current_mode = !(*current_mode);
+    // Timer 1 configuration
+    T1CONbits.TON = 1;
+    T1CONbits.TSIDL = 1;
+    T1CONbits.TCS = 0;
+    T1CONbits.TCKPS = 0b10; // Prescaler 1:64
+    PR1 = 62499;            // 1-second interval
 
-    UpdateDisplayCounter(counter);
-    UpdatePotentiometerValue(potentiometer_value, previous_potentiometer_value);
+    // Interrupt configuration
+    IFS0bits.T1IF = 0;     // Clear Timer 1 interrupt flag
+    IPC0bits.T1IP = 0b001; // Set priority to 1
+    IEC0bits.T1IE = 1;     // Enable Timer 1 interrupt
+    INTCON2bits.GIE = 1;   // Enable global interrupts
 }
 
-void UpdateDisplayCounter(int *new_counter)
+char lighthouseFlag = 0;
+
+// Lighthouse display function
+void lighthouse()
 {
-    static int last_counter = -1;
-    char text_buffer[10];
+    static int counter = 4;
 
-    if (last_counter != *new_counter)
+    if (lighthouseFlag)
     {
-        sprintf(text_buffer, "S:%3d", last_counter);
-        oledC_DrawString(10, 60, 2, 2, (uint8_t *)text_buffer, current_background_color);
+        if (counter == 4)
+        {
+            int xStart, xFinish, yStart;
+            oledC_clearScreen();
+            for (xStart = xFinish = 144, yStart = 48; yStart < 97; ++yStart, --xStart, ++xFinish)
+            {
+                oledC_DrawRectangle(xStart / 3, yStart, xFinish / 3, 96, OLEDC_COLOR_BLUE);
+            }
+        }
+        else
+        {
+            oledC_DrawRing(48, 48, 16 * counter, 30, OLEDC_COLOR_YELLOW);
+            if (counter > 0)
+            {
+                oledC_DrawRing(48, 48, 16 * (counter - 1), 30, OLEDC_COLOR_BLACK);
+            }
+        }
 
-        sprintf(text_buffer, "S:%3d", *new_counter);
-        oledC_DrawString(10, 60, 2, 2, (uint8_t *)text_buffer, OLEDC_COLOR_ROYALBLUE);
-
-        last_counter = *new_counter;
+        counter = (counter + 1) % 5;
+        lighthouseFlag = 0;
     }
 }
 
-void UpdatePotentiometerValue(int *potentiometer_value, int *previous_potentiometer_value)
+// Timer 1 Interrupt Service Routine
+void __attribute__((__interrupt__)) _T1Interrupt(void)
 {
-    static int last_potentiometer = -1;
-    char text_buffer[10];
-
-    if (last_potentiometer != *potentiometer_value)
-    {
-        sprintf(text_buffer, "P:%3d", last_potentiometer);
-        oledC_DrawString(10, 10, 2, 2, (uint8_t *)text_buffer, current_background_color);
-
-        sprintf(text_buffer, "P:%3d", *potentiometer_value);
-        oledC_DrawString(10, 10, 2, 2, (uint8_t *)text_buffer, OLEDC_COLOR_TURQUOISE);
-
-        last_potentiometer = *potentiometer_value;
-    }
+    lighthouseFlag = 1;
+    IFS0bits.T1IF = 0; // Clear Timer 1 interrupt flag
 }
 
+// Main function
 int main(void)
 {
-    int display_counter = 0, potentiometer = 0;
-    int previous_potentiometer = -1;
-    DISPLAY_MODE current_mode = MODE_INVERSE;
-
     SYSTEM_Initialize();
-    InitializeUserHardware();
-
-    SetOLEDBackground(OLEDC_COLOR_AZURE);
-
-    UpdateDisplayCounter(&display_counter);
-    UpdatePotentiometerValue(&potentiometer, &previous_potentiometer);
+    user_init();
 
     while (1)
     {
-        if (PORTAbits.RA11 == 0)
-        {
-            LATAbits.LATA8 = 1;
-        }
-        else if (LATAbits.LATA8 == 1)
-        {
-            LATAbits.LATA8 = 0;
-            display_counter++;
-            UpdateDisplayCounter(&display_counter);
-        }
-
-        if (PORTAbits.RA12 == 0)
-        {
-            LATAbits.LATA9 = 1;
-        }
-        else if (LATAbits.LATA9 == 1)
-        {
-            LATAbits.LATA9 = 0;
-            ToggleDisplayMode(&display_counter, &potentiometer, &previous_potentiometer, &current_mode);
-        }
-
-        AD1CON1bits.SAMP = 1;
-        for (int i = 0; i < 1000; i++)
-            ;
-        AD1CON1bits.SAMP = 0;
-
-        while (!AD1CON1bits.DONE)
-            ;
-        potentiometer = ADC1BUF0;
-
-        if (abs(potentiometer - previous_potentiometer) > 8)
-        {
-            UpdatePotentiometerValue(&potentiometer, &previous_potentiometer);
-            previous_potentiometer = potentiometer;
-        }
+        lighthouse();
     }
 
-    return 1;
+    return 0;
 }
