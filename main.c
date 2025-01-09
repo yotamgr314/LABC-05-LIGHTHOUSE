@@ -103,7 +103,6 @@ void User_Initialize(void)
     InitializeTimer1();
 }
 
-// Main function (entry point of the program)
 int main(void)
 {
     // Call the system-level initialization function (sets up clocks, ports, etc.)
@@ -118,6 +117,5 @@ int main(void)
         // The Timer 1 interrupt service routine will handle the lighthouse toggling
     }
 
-    // Return 0 to indicate successful execution (this line will never be reached)
     return 0;
 }
